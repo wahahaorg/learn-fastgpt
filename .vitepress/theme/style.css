@@ -1,0 +1,32 @@
+:root {
+  --vp-c-brand-1: #0f766e;
+  --vp-c-brand-2: #0d9488;
+  --vp-c-brand-3: #14b8a6;
+  --vp-c-brand-soft: rgba(20, 184, 166, 0.16);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #0f766e 12%, #2563eb 48%, #7c3aed 88%);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, #ccfbf1 0%, #dbeafe 50%, #ede9fe 100%);
+  --vp-home-hero-image-filter: blur(44px);
+}
+
+.VPHomeHero .text {
+  max-width: 760px;
+}
+
+.vp-doc h2 {
+  border-top: 1px solid var(--vp-c-divider);
+  margin-top: 40px;
+  padding-top: 28px;
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+
+.learning-card {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--vp-c-bg-soft);
+}
