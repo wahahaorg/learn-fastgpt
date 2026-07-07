@@ -15,6 +15,37 @@
 
 ## 什么是运行时
 
+```mermaid
+flowchart TD
+    subgraph 运行时生命周期
+        Created[created] -->|开始| Running[running]
+        Running -->|完成| Completed[completed]
+        Running -->|失败| Failed[failed]
+        Running -->|用户取消| Cancelled[cancelled]
+        Running -->|等待确认| Paused[paused]
+        Paused -->|用户回复| Running
+    end
+
+    subgraph 每轮 Step
+        S1[构造上下文] --> S2[调用模型]
+        S2 --> S3{输出类型?}
+        S3 -->|answer| S4[保存结果<br>标记完成]
+        S3 -->|tool_call| S5[执行工具]
+        S5 --> S6[工具结果加入消息]
+        S6 --> S1
+        S3 -->|ask| S7[保存暂停状态<br>等用户输入]
+    end
+
+    Running --> S1
+
+    style Created fill:#e3f2fd
+    style Running fill:#fff9c4
+    style Paused fill:#ffccbc
+    style Completed fill:#c8e6c9
+    style Failed fill:#ffcdd2
+    style Cancelled fill:#ffe0b2
+```
+
 一个 Agent 不是调用一次大模型就结束。真实 Agent 往往会经历多轮循环：
 
 ```txt
@@ -73,6 +104,32 @@ type AgentStep = {
 Run 解决“这次任务整体是什么状态”，Step 解决“中间发生过什么”。
 
 ## 事件流
+
+```mermaid
+sequenceDiagram
+    participant F as 前端
+    participant R as 运行时
+    participant M as 模型
+    participant T as 工具
+
+    F->>R: 开始运行
+    R-->>F: run.started
+
+    R->>M: 调用模型
+    M-->>R: tool_call
+    R-->>F: tool.started (查询订单)
+
+    R->>T: 执行工具
+    T-->>R: 工具结果
+    R-->>F: tool.completed
+
+    R->>M: 继续调用模型(含工具结果)
+    M-->>R: answer
+    R-->>F: model.delta (流式文字)
+    R-->>F: run.completed
+
+    Note over R,F: 前端实时展示每一步状态
+```
 
 运行时最好把执行过程转换成事件：
 
@@ -259,6 +316,155 @@ run.completed
 ```
 
 注意：不要把内部敏感参数直接推给前端。展示“正在查询订单”通常足够，不需要展示完整鉴权信息或内部请求体。
+
+## 事件总线
+
+事件流需要一个中心化的总线来管理订阅和分发：
+
+```ts
+type EventHandler = (event: AgentEvent) => void | Promise<void>;
+
+class EventBus {
+  private handlers: Map<AgentEvent['type'], EventHandler[]> = new Map();
+
+  on(type: AgentEvent['type'], handler: EventHandler): void {
+    if (!this.handlers.has(type)) {
+      this.handlers.set(type, []);
+    }
+    this.handlers.get(type)!.push(handler);
+  }
+
+  off(type: AgentEvent['type'], handler: EventHandler): void {
+    const handlers = this.handlers.get(type);
+    if (handlers) {
+      this.handlers.set(
+        type,
+        handlers.filter((h) => h !== handler)
+      );
+    }
+  }
+
+  async emit(event: AgentEvent): Promise<void> {
+    // 通知所有订阅该类型的 handler
+    const handlers = this.handlers.get(event.type) ?? [];
+
+    for (const handler of handlers) {
+      try {
+        await handler(event);
+      } catch (error) {
+        console.error(`Event handler error [${event.type}]:`, error);
+      }
+    }
+
+    // 通配符订阅（监听所有事件）
+    const allHandlers = this.handlers.get('*' as AgentEvent['type']) ?? [];
+    for (const handler of allHandlers) {
+      try {
+        await handler(event);
+      } catch (error) {
+        console.error('Wildcard handler error:', error);
+      }
+    }
+  }
+}
+
+// 使用示例
+const bus = new EventBus();
+
+bus.on('tool.started', (event) => {
+  // 前端推送工具执行状态
+  pushToFrontend(event);
+});
+
+bus.on('run.completed', (event) => {
+  // 持久化运行记录
+  saveRunToDatabase(event);
+});
+
+bus.on('run.failed', (event) => {
+  // 发送告警
+  alertEngineer(event);
+});
+```
+
+事件总线的价值在于解耦：运行时不需要知道谁在监听，监听者也不需要知道运行时的内部细节。
+
+## 暂停与恢复的完整实现
+
+```ts
+type PauseReason = 'human_confirmation' | 'tool_approval' | 'rate_limited';
+
+type RuntimeSnapshot = {
+  runId: string;
+  messages: Message[];
+  planManager?: PlanManager;
+  completedSteps: AgentStep[];
+  pauseReason: PauseReason;
+  pausePayload: unknown;
+  resumeToken: string;
+  createdAt: number;
+};
+
+class PauseResumeManager {
+  private snapshots: Map<string, RuntimeSnapshot> = new Map();
+
+  // 暂停并保存完整快照
+  async pause(
+    runId: string,
+    reason: PauseReason,
+    payload: unknown,
+    state: {
+      messages: Message[];
+      planManager?: PlanManager;
+      completedSteps: AgentStep[];
+    }
+  ): Promise<string> {
+    const resumeToken = crypto.randomUUID();
+
+    const snapshot: RuntimeSnapshot = {
+      runId,
+      messages: state.messages,
+      planManager: state.planManager,
+      completedSteps: state.completedSteps,
+      pauseReason: reason,
+      pausePayload: payload,
+      resumeToken,
+      createdAt: Date.now()
+    };
+
+    this.snapshots.set(resumeToken, snapshot);
+    return resumeToken;
+  }
+
+  // 从快照恢复
+  async resume(resumeToken: string): Promise<RuntimeSnapshot> {
+    const snapshot = this.snapshots.get(resumeToken);
+
+    if (!snapshot) {
+      throw new Error('无效的 resumeToken，快照不存在或已过期');
+    }
+
+    // 检查快照是否过期（默认 30 分钟）
+    const ttl = 30 * 60 * 1000;
+    if (Date.now() - snapshot.createdAt > ttl) {
+      this.snapshots.delete(resumeToken);
+      throw new Error('快照已过期，请重新开始任务');
+    }
+
+    this.snapshots.delete(resumeToken);
+    return snapshot;
+  }
+
+  // 获取待处理的暂停请求
+  getPendingConfirmation(userId: string): RuntimeSnapshot[] {
+    return Array.from(this.snapshots.values())
+      .filter(
+        (s) =>
+          s.pauseReason === 'human_confirmation' || s.pauseReason === 'tool_approval'
+      );
+  }
+}
+```
 
 ## 运行时状态机
 

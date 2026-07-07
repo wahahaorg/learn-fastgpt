@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress';
+import { withMermaid } from 'vitepress-plugin-mermaid';
 
-export default defineConfig({
+export default withMermaid({
   title: 'Agent 开发教程',
   description: '从零学习 Agent、知识库、工具调用与工作流编排',
   lang: 'zh-CN',

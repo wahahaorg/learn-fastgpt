@@ -32,16 +32,36 @@ RAG 不是让模型“记住”资料，而是在回答前“查到”资料。
 
 一个完整知识库通常分两条链路。
 
-写入链路：
+```mermaid
+flowchart LR
+    subgraph 写入链路
+        UP[上传文档] --> PS[解析文本]
+        PS --> CH[切块 Chunk]
+        CH --> IDX[建索引]
+        IDX --> EM[embedding 向量化]
+        EM --> ST[(向量数据库)]
+        IDX --> KW[关键词索引]
+        KW --> ST
+    end
 
-```txt
-文档上传 -> 解析文本 -> 切块 -> 建索引 -> 存储
-```
+    subgraph 查询链路
+        Q[用户问题] --> QE[查询改写]
+        QE --> SR[向量检索]
+        QE --> KR[关键词检索]
+        SR --> MR[混合排序]
+        KR --> MR
+        MR --> RR[rerank 重排序]
+        RR --> CT[裁剪 topK]
+        CT --> CI[注入上下文]
+        CI --> LLM[模型生成回答]
+    end
 
-查询链路：
+    ST -.-> SR
+    ST -.-> KR
 
-```txt
-用户问题 -> 查询改写 -> 检索 -> 排序 -> 裁剪 -> 注入上下文 -> 生成答案
+    style 写入链路 fill:#e8f5e9
+    style 查询链路 fill:#e3f2fd
+    style ST fill:#f3e5f5
 ```
 
 很多初学者只关注查询，忽略写入。实际效果不好，常常是因为文档切块和索引阶段就做错了。
@@ -67,6 +87,31 @@ RAG 不是让模型“记住”资料，而是在回答前“查到”资料。
 - 给图片或附件留下可追踪引用。
 
 ## 切块
+
+```mermaid
+flowchart TD
+    Doc[原始文档] --> Strategy{切块策略}
+
+    Strategy -->|按段落切| P[段落级 chunk<br>每段独立<br>适合: 结构清晰的文档]
+    Strategy -->|按标题切| H[标题级 chunk<br>保留标题层级<br>适合: Markdown/技术文档]
+    Strategy -->|固定 token 切| F[固定 N tokens<br>overlap 保留边界<br>适合: 格式混乱的长文本]
+    Strategy -->|滑动窗口切| SW[窗口滑动 N, overlap M<br>上下文连续<br>适合: 需要边界语义保留]
+    Strategy -->|问答对切| QA[FAQ 格式<br>一问一答<br>适合: 客服知识库]
+
+    Doc --> M[Metadata]
+    M --> Source[来源 sourceId]
+    M --> Title[标题 title]
+    M --> Section[章节 section]
+    M --> Page[页码 page]
+
+    style Doc fill:#e3f2fd
+    style Strategy fill:#fff9c4
+    style P fill:#e8f5e9
+    style H fill:#e8f5e9
+    style F fill:#e8f5e9
+    style SW fill:#e8f5e9
+    style QA fill:#e8f5e9
+```
 
 模型不能一次读取整个文档，所以要切块。
 
@@ -98,6 +143,41 @@ type Chunk = {
 | 问答对切 | FAQ、客服知识 |
 
 建议第一版使用“标题 + 段落 + 最大长度”的混合策略。
+
+## Embedding 模型选型
+
+Embedding 模型把文本转为向量。不同模型在精度、价格、语言支持和维度上差异很大。
+
+| 模型 | 维度 | 每千文本价格 | 中文支持 | MTEB | 延迟 |
+|------|------|------------|---------|------|------|
+| text-embedding-3-small | 512-1536 | $0.02 | 好 | 62.3% | 低 |
+| text-embedding-3-large | 256-3072 | $0.13 | 好 | 64.6% | 中 |
+| bge-large-zh-v1.5 | 1024 | 免费(自部署) | 优秀 | 63.7% | 中 |
+| bge-m3 | 1024 | 免费(自部署) | 优秀 | 64.2% | 中 |
+| jina-embeddings-v3 | 1024 | 免费(自部署) | 好 | 64.5% | 中 |
+| Cohere embed-v3 | 1024 | $0.10 | 中 | 64.0% | 低 |
+
+选型建议：
+- **快速验证**：text-embedding-3-small，便宜且 API 调用简单
+- **中文场景**：bge-m3 或 bge-large-zh-v1.5，中文语义理解最好
+- **精度优先**：text-embedding-3-large 或 jina-embeddings-v3
+- **自部署**：BGE 系列，MIT 许可证，可商用
+
+测试 embedding 质量的一个简单方法：准备 100 个查询-文档对，计算 recall@10。不同模型在这个指标上可能差 10-20 个百分点。
+
+## 向量数据库选型
+
+| 特性 | PGVector | Milvus | ChromaDB | Pinecone |
+|------|---------|--------|----------|----------|
+| 部署方式 | 自部署 | 自部署/云 | 自部署/嵌入式 | 仅云 |
+| 运维成本 | 低(PostgreSQL 扩展) | 高(独立集群) | 极低 | 无 |
+| 向量维度上限 | 2000 | 65535 | 无限制 | 无限制 |
+| 混合搜索 | 原生 SQL + 向量 | 需要配置 | 有限 | 付费 |
+| 标量过滤 | 强(SQL where) | 中等 | 基本 | 基本 |
+| 开源 | 是 | 是 | 是 | 否 |
+| 适合阶段 | 小到中型(千万级) | 大型(亿级) | 原型开发 | 生产托管 |
+
+第一版建议用 PGVector。理由：不需要额外维护一个数据库，PostgreSQL 已经在用了，SQL 查询灵活，运维成本最低。
 
 ## 向量索引
 
@@ -156,6 +236,78 @@ type Chunk = {
 
 查询改写可以使用模型完成，但要注意成本。简单场景可以先用最近对话拼接。
 
+## 混合检索
+
+在实际系统中，只靠向量检索或只靠关键词检索都有盲区。
+
+```ts
+type HybridSearchResult = {
+  chunks: ScoredChunk[];
+  vectorScore: number;
+  keywordScore: number;
+  finalScore: number;
+};
+
+type SearchStrategy = {
+  vectorWeight: number;    // 向量检索权重 (0-1)
+  keywordWeight: number;   // 关键词检索权重 (0-1)
+  topK: number;            // 最终返回数量
+  rerankTopK: number;      // rerank 候选数量
+};
+
+function hybridSearch(
+  query: string,
+  chunks: ScoredChunk[],
+  strategy: SearchStrategy
+): ScoredChunk[] {
+  const { vectorWeight, keywordWeight, topK, rerankTopK } = strategy;
+
+  // 1. 向量检索结果
+  const vectorResults = vectorSearch(query, chunks, rerankTopK);
+
+  // 2. 关键词检索结果（BM25 或简单关键词匹配）
+  const keywordResults = keywordSearch(query, chunks, rerankTopK);
+
+  // 3. 合并打分
+  const merged = new Map<string, ScoredChunk>();
+
+  for (const result of vectorResults) {
+    merged.set(result.id, {
+      ...result,
+      finalScore: (result.score ?? 0) * vectorWeight
+    });
+  }
+
+  for (const result of keywordResults) {
+    const existing = merged.get(result.id);
+    if (existing) {
+      existing.finalScore += (result.score ?? 0) * keywordWeight;
+      // 同时命中的加权
+      existing.finalScore *= 1.2;
+    } else {
+      merged.set(result.id, {
+        ...result,
+        finalScore: (result.score ?? 0) * keywordWeight
+      });
+    }
+  }
+
+  // 4. 按综合得分排序
+  return Array.from(merged.values())
+    .sort((a, b) => b.finalScore - a.finalScore)
+    .slice(0, topK);
+}
+```
+
+权重调优建议：
+
+| 场景 | vectorWeight | keywordWeight | 说明 |
+|------|-------------|--------------|------|
+| 通用问答 | 0.7 | 0.3 | 语义匹配为主 |
+| 代码/文档 | 0.3 | 0.7 | 精确匹配重要 |
+| 产品型号查询 | 0.2 | 0.8 | 关键词命中更重要 |
+| 法律法规 | 0.5 | 0.5 | 均衡 |
+
 ## rerank
 
 初次检索返回的是候选集，rerank 负责重新排序。
@@ -165,6 +317,35 @@ type Chunk = {
 ```
 
 rerank 模型会更认真地比较“问题”和“片段”是否相关。它通常比直接向量相似度更准，但更慢、更贵。
+
+## 检索质量评测
+
+没有评测的检索系统是在碰运气。
+
+```ts
+type RetrievalEvalCase = {
+  id: string;
+  query: string;
+  expectedChunkIds: string[];
+};
+```
+
+用这个评测工具对比不同检索策略，你会发现混合检索通常比单一策略高 10-20 个百分点的 Recall。“问题”和“片段”是否相关。它通常比直接向量相似度更准，但更慢、更贵。
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant A as Agent
+    participant KB as 知识库
+    participant LLM as 模型
+
+    U->>A: 退款规则是什么？
+    A->>KB: 检索"退款规则"
+    KB-->>A: [资料1: 退款政策], [资料2: 有效期说明]
+    A->>LLM: System: 基于资料回答 + 资料上下文
+    LLM-->>A: 退款需要满足以下条件...
+    A->>U: 答案 + 引用 [1][2]
+```
 
 ## 上下文注入
 

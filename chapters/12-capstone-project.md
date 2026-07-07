@@ -15,6 +15,45 @@
 - 一个可查看 trace 的调试页面。
 - 一组基础评测案例。
 
+```mermaid
+flowchart TD
+    subgraph 前端界面
+        UI[聊天界面] -->|用户输入| API
+        UI -->|展示状态| Events[事件流展示]
+        UI -->|trace 查看| Debug[调试面板]
+    end
+
+    subgraph 后端服务
+        API[API 路由] --> Agent[Agent 配置]
+        API --> Run[运行时管理]
+        Run --> R[Agent 运行时]
+        R --> KB[知识库检索]
+        R --> TC[工具调用]
+        R --> LLM[模型调用]
+    end
+
+    subgraph 存储
+        DB[(数据库)]
+        DB --> AgentConfig[Agent 配置]
+        DB --> Docs[文档/Chunk]
+        DB --> Traces[运行记录/Trace]
+    end
+
+    subgraph 评测
+        Eval[评测集] --> EvalRun[批量运行]
+        EvalRun --> Report[测评报告]
+    end
+
+    KB --> Docs
+    TC --> Tools[工具实现]
+    Run --> Traces
+
+    style 前端界面 fill:#e3f2fd
+    style 后端服务 fill:#e8f5e9
+    style 存储 fill:#f3e5f5
+    style 评测 fill:#fff9c4
+```
+
 ## 项目目标
 
 用户可以上传几篇产品文档，然后向 Agent 提问。Agent 会检索知识库，必要时调用工具，并给出带引用的回答。
@@ -183,7 +222,48 @@ const createTicketDraftTool: Tool = {
 
 注意这里是草稿，不是直接提交。学习阶段先把高风险操作变成“准备动作”，再要求用户确认。
 
-## 第三步：编写系统提示词
+## 第三步：部署配置
+
+项目可以一键本地启动：
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file: .env
+    depends_on:
+      - postgres
+    volumes:
+      - ./data:/app/data
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: agent_platform
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+```bash
+# 启动方式
+cp .env.example .env    # 配置 API Key 等
+docker compose up -d    # 启动所有服务
+pnpm run dev            # 启动开发服务器
+pnpm run test           # 运行测试和评测
+```
+
+## 第四步：编写系统提示词
 
 系统提示词可以这样开始：
 
@@ -301,6 +381,29 @@ const evalCases = [
 每次修改提示词、检索逻辑或工具说明后运行评测。
 
 ## 里程碑顺序
+
+```mermaid
+gantt
+    title 综合实战项目里程碑
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m/%d
+
+    section 基础
+    跑通普通问答           :a1, 2025-01-01, 3d
+    加入文档切分和检索       :a2, after a1, 3d
+    让回答带引用            :a3, after a2, 2d
+
+    section 工具
+    加入工具注册表          :b1, after a3, 2d
+    Agent 调用查询工具      :b2, after b1, 2d
+    高风险工具确认          :b3, after b2, 2d
+
+    section 质量
+    保存 trace             :c1, after b3, 2d
+    做调试页面              :c2, after c1, 3d
+    增加评测集              :c3, after c2, 2d
+    优化失败案例            :c4, after c3, 3d
+```
 
 建议按这个顺序做：
 
