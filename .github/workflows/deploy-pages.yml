@@ -28,7 +28,11 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          # 删除 package-lock.json 以规避 npm optional dependencies 在 CI 中不安装平台原生模块的 bug
+          # 参考: https://github.com/npm/cli/issues/4828
+          rm -f package-lock.json
+          npm install
 
       - name: Build
         run: npm run build
