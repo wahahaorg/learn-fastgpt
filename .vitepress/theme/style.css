@@ -1,0 +1,88 @@
+:root {
+  --vp-c-brand-1: #0f766e;
+  --vp-c-brand-2: #0d9488;
+  --vp-c-brand-3: #14b8a6;
+  --vp-c-brand-soft: rgba(20, 184, 166, 0.16);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #0f766e 12%, #2563eb 48%, #7c3aed 88%);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, #ccfbf1 0%, #dbeafe 50%, #ede9fe 100%);
+  --vp-home-hero-image-filter: blur(44px);
+}
+
+.VPHomeHero .text {
+  max-width: 760px;
+}
+
+.vp-doc h2 {
+  border-top: 1px solid var(--vp-c-divider);
+  margin-top: 40px;
+  padding-top: 28px;
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+
+.learning-card {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--vp-c-bg-soft);
+}
+
+/* ── Mermaid 图：正常态可横向滚动，cursor 提示可点击放大 ── */
+.mermaid {
+  overflow-x: auto;
+  cursor: zoom-in;
+}
+
+/* ── Mermaid 灯箱遮罩 ── */
+.mermaid-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  padding: 24px;
+  cursor: zoom-out;
+  animation: mermaid-overlay-in 0.18s ease;
+}
+
+@keyframes mermaid-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.mermaid-zoom-overlay svg {
+  border-radius: 8px;
+  background: var(--vp-c-bg, #fff);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+}
+
+.mermaid-zoom-close {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.mermaid-zoom-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
